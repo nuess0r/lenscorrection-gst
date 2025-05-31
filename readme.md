@@ -49,7 +49,11 @@ gst-launch-1.0  v4l2src device=/dev/video0 ! 'video/x-raw, width=640, height=480
 
 ## Notes
 
-Setting camera manufactuer, camera type and lens type is broken
+Setting camera manufactuer, camera type and lens type is fixed
+
+Video output after remap function is broken with following pipeline:
+
+LANG= GST_DEBUG=python:4 gst-launch-1.0 filesrc location=GOPR0141.MP4 ! decodebin ! videoconvert ! lenscorrection ! queue ! videoconvert ! xvimagesink 
 
 ## References
 
