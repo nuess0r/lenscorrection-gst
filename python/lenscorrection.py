@@ -13,7 +13,7 @@
 #  $ GST_DEBUG=python:4 gst-launch-1.0 fakesrc num-buffers=10 ! lenscorrection ! fakesink
 #
 #  Example with full set of properties
-#  $ GST_DEBUG=python:4 gst-launch-1.0 fakesrc num-buffers=10 ! video/x-raw, width=640, height=480, framerate=30/1 ! lenscorrection aperture=5.6 focallength=50 distance=10.0 reverse=False cammaker="Nikon" cammodel="D7200" lens="Nikon AF Zoom-Nikkor 28-105mm f/3.5-4.5D IF"
+#  $ LANG= GST_DEBUG=python:4 gst-launch-1.0 fakesrc num-buffers=10 ! video/x-raw, width=640, height=480, framerate=30/1 ! lenscorrection aperture=5.6 focallength=50 distance=10.0 reverse=False cammaker="NIKON CORPORATION" cammodel="NIKON D7200" lens="Nikon AF Zoom-Nikkor 28-105mm f/3.5-4.5D IF" aperture=5.6 focallength=70 distance=10.0 reverse=false ! fakesink
 #
 # List of supported cameras and lenses: https://lensfun.github.io/lenslist/
 
@@ -110,19 +110,22 @@ class Lenscorrection(GstBase.BaseTransform):
             DEFAULT_REVERSE,
             GObject.ParamFlags.READWRITE
            ),
-        "cammaker": (GObject.TYPE_GSTRING,
+        "cammaker": (str,
             "Manufacturer",
             "The camera manufacturer.",
+            DEFAULT_CAMMAKER,
             GObject.ParamFlags.READWRITE
            ),
-        "cammodel": (GObject.TYPE_GSTRING,
+        "cammodel": (str,
             "Camera",
             "The camera model.",
+            DEFAULT_CAMMODEL,
             GObject.ParamFlags.READWRITE
            ),
-        "lens": (GObject.TYPE_GSTRING,
+        "lens": (str,
             "Lens",
             "The lens model.",
+            DEFAULT_LENS,
             GObject.ParamFlags.READWRITE
            ),
     }
@@ -148,14 +151,23 @@ class Lenscorrection(GstBase.BaseTransform):
         Gst.info("query lensfun")
         try:
             #Query the Lensfun db for camera parameters
-            Gst.debug("Opening Lensfun database")
+            Gst.info(f"Opening Lensfun database: {self.cammaker}, {self.cammodel}")
             db = lensfunpy.Database()
             cam = db.find_cameras(self.cammaker, self.cammodel)[0]
+            print(cam)
+        except Exception as e:
+            Gst.error("Camera not found %s" % e)
+            return False
+        try: 
             if self.lens:
                 lens = db.find_lenses(cam,lens=self.lens)[0]
             else:
                 lens = db.find_lenses(cam)[0]
-
+            print(lens)
+        except Exception as e:
+            Gst.error("Lens not found %s" % e)
+            return False
+        try:
             mod = lensfunpy.Modifier(lens, cam.crop_factor, self.width, self.height)
             mod.initialize(self.focallength, self.aperture, self.distance, reverse=self.reverse)
 
@@ -209,16 +221,18 @@ class Lenscorrection(GstBase.BaseTransform):
             self.reverse = value
         elif prop.name == 'cammaker':
             Gst.info("set cammaker")
-            GLib.utf8_validate(value.str)
-            self.cammaker = value.getvalue()
+            Gst.info("%s" % value)
+            self.cammaker = value
         elif prop.name == 'cammodel':
+            Gst.info("set cammodel")
+            Gst.info("%s" % value)
             self.cammodel = value
         elif prop.name == 'lens':
             self.lens = value
         else:
             raise AttributeError('unknown property %s' % prop.name)
             
-        self.query_lensfun()
+        #self.query_lensfun()
 
     def do_transform_ip(self, inbuf):
         try:
