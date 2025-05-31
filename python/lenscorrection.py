@@ -13,7 +13,7 @@
 #  $ GST_DEBUG=python:4 gst-launch-1.0 fakesrc num-buffers=10 ! lenscorrection ! fakesink
 #
 #  Example with full set of properties
-#  $ LANG= GST_DEBUG=python:4 gst-launch-1.0 fakesrc num-buffers=10 ! video/x-raw, width=640, height=480, framerate=30/1 ! lenscorrection aperture=5.6 focallength=50 distance=10.0 reverse=False cammaker="NIKON CORPORATION" cammodel="NIKON D7200" lens="Nikon AF Zoom-Nikkor 28-105mm f/3.5-4.5D IF" aperture=5.6 focallength=70 distance=10.0 reverse=false ! fakesink
+#  $ LANG= GST_DEBUG=python:4 gst-launch-1.0 fakesrc num-buffers=10 ! video/x-raw, width=640, height=480, framerate=30/1 ! lenscorrection aperture=5.6 focallength=50 distance=10.0 reverse=False cammaker="NIKON CORPORATION" cammodel="NIKON D7200" lens="Nikon AF Zoom-Nikkor 28-105mm f/3.5-4.5D IF" ! fakesink
 #
 # List of supported cameras and lenses: https://lensfun.github.io/lenslist/
 
@@ -186,7 +186,7 @@ class Lenscorrection(GstBase.BaseTransform):
         self.width = s.get_int("width").value
         self.height = s.get_int("height").value
         
-        self.query_lensfun()
+        #self.query_lensfun()
 
         return True
 
@@ -231,21 +231,42 @@ class Lenscorrection(GstBase.BaseTransform):
             self.lens = value
         else:
             raise AttributeError('unknown property %s' % prop.name)
-            
-        #self.query_lensfun()
 
-    def do_transform_ip(self, inbuf):
+    def do_start (self):
+        self.query_lensfun()
+
+        return True
+
+    def do_transform(self, inbuf, outbuf):
         try:
             inbuf_info = inbuf.map(Gst.MapFlags.READ | Gst.MapFlags.WRITE)
+            outbuf_info = outbuf.map(Gst.MapFlags.READ | Gst.MapFlags.WRITE)
             with inbuf_info:
                 frame = numpy.ndarray(
                     shape=(self.height, self.width, 3),
                     dtype=numpy.uint8,
                     buffer=inbuf_info.data,
                 )
-                
-                cv2.remap(frame, self.undistCoords, None, cv2.INTER_NEAREST)
+                undistorted = numpy.ndarray(
+                    shape=(self.height, self.width, 3),
+                    dtype=numpy.uint8,
+                    buffer=outbuf_info.data,
+                )
+                #frame[:] = numpy.invert(frame)
+                # Writing text over blank image using the cv2.putText function
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                cv2.putText(frame,text='PythonGeeks',
+                     org=(70,300),
+                     fontFace=font,
+                     fontScale=2,
+                     color=(255,255,255),
+                     thickness=5,
+                     lineType=cv2.LINE_AA)
 
+                #undistorted = frame
+                undistorted = cv2.remap(frame, self.undistCoords, None, cv2.INTER_NEAREST)
+                #outbuf_info.data = cv2.remap(frame, self.undistCoords, None, cv2.INTER_NEAREST)
+                #outbuf.append_memory(mem)(frame)
                 return Gst.FlowReturn.OK
 
         except Gst.MapError as e:
