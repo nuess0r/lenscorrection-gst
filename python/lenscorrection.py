@@ -194,6 +194,10 @@ class Lenscorrection(GstBase.BaseTransform):
         font = cv2.FONT_HERSHEY_SIMPLEX
         stepx = int(self.width/8)
         stepy = int(self.height/8)
+        for i in range(1,8):
+            # draw blue grid lines
+            cv2.line(self.overlay,(stepx*i,0),(stepx*i,self.height),(0,0,255),5)
+            cv2.line(self.overlay,(0,stepy*i),(self.width,stepy*i),(0,0,255),5)
         cv2.putText(self.overlay,text=f"{self.cam}",
                     org=(stepx+100,stepy+50),
                     fontFace=font,
@@ -215,11 +219,6 @@ class Lenscorrection(GstBase.BaseTransform):
                     color=(255,255,255),
                     thickness=5,
                     lineType=cv2.LINE_AA)
-        for i in range(1,8):
-            # draw blue grid lines
-            cv2.line(self.overlay,(stepx*i,0),(stepx*i,self.height),(0,0,255),5)
-            cv2.line(self.overlay,(0,stepy*i),(self.width,stepy*i),(0,0,255),5)
-
         return True
 
     def do_set_caps(self, incaps, outcaps):
@@ -275,30 +274,24 @@ class Lenscorrection(GstBase.BaseTransform):
         else:
             raise AttributeError('unknown property %s' % prop.name)
 
-    def do_transform(self, inbuf, outbuf):
+    def do_transform_ip(self, inbuf):
         try:
             inbuf_info = inbuf.map(Gst.MapFlags.READ | Gst.MapFlags.WRITE)
-            outbuf_info = outbuf.map(Gst.MapFlags.READ | Gst.MapFlags.WRITE)
             with inbuf_info:
                 frame = numpy.ndarray(
                     shape=(self.height, self.width, 3),
                     dtype=numpy.uint8,
                     buffer=inbuf_info.data,
                 )
-                undistorted = numpy.ndarray(
-                    shape=(self.height, self.width, 3),
-                    dtype=numpy.uint8,
-                    buffer=outbuf_info.data,
-                )
 
                 if self.grid:
-                    img = cv2.addWeighted(frame, 0.5, self.overlay, 0.5, 0)
+                    img = cv2.addWeighted(frame, 1, self.overlay, 0.7, 0)
                 else:
                     img = frame
                 
                 array = cv2.remap(img, self.undistCoords, None, cv2.INTER_NEAREST)
                 
-                undistorted[:] = array[:]
+                frame[:] = array[:]
                 return Gst.FlowReturn.OK
 
         except Gst.MapError as e:
