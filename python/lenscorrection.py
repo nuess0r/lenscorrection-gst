@@ -13,7 +13,7 @@
 #  $ GST_DEBUG=python:4 gst-launch-1.0 fakesrc num-buffers=10 ! lenscorrection ! fakesink
 #
 #  Example with full set of properties
-#  $ LANG= GST_DEBUG=python:4 gst-launch-1.0 fakesrc num-buffers=10 ! video/x-raw, width=640, height=480, framerate=30/1 ! lenscorrection aperture=5.6 focallength=50 distance=10.0 reverse=False cammaker="NIKON CORPORATION" cammodel="NIKON D7200" lens="Nikon AF Zoom-Nikkor 28-105mm f/3.5-4.5D IF" ! fakesink
+#  $ LANG= GST_DEBUG=python:4 gst-launch-1.0 fakesrc num-buffers=10 ! video/x-raw, width=640, height=480, framerate=30/1 ! lenscorrection aperture=5.6 focallength=50 distance=10.0 reverse=False grid=False cammaker="NIKON CORPORATION" cammodel="NIKON D7200" lens="Nikon AF Zoom-Nikkor 28-105mm f/3.5-4.5D IF" ! fakesink
 #
 # List of supported cameras and lenses: https://lensfun.github.io/lenslist/
 
@@ -33,9 +33,10 @@ Gst.init(None)
 DEFAULT_WIDTH = 1920
 DEFAULT_HIGH = 1080
 DEFAULT_APERTURE = 2.8
-DEFAULT_FOCALLENGTH = 50
-DEFAULT_DISTANCE = 1000.0
+DEFAULT_FOCALLENGTH = 2.5
+DEFAULT_DISTANCE = 10.0
 DEFAULT_REVERSE = False
+DEFAULT_GRID = False
 DEFAULT_CAMMAKER = "GoPro"
 DEFAULT_CAMMODEL = "HD2"
 DEFAULT_LENS = ""
@@ -88,10 +89,10 @@ class Lenscorrection(GstBase.BaseTransform):
             DEFAULT_APERTURE,
             GObject.ParamFlags.READWRITE
            ),
-        "focallength": (int,
+        "focallength": (float,
             "Focallength",
             "The focal length in mm at which the image was taken.",
-            0,
+            0.0,
             1000000,
             DEFAULT_FOCALLENGTH,
             GObject.ParamFlags.READWRITE
@@ -99,7 +100,7 @@ class Lenscorrection(GstBase.BaseTransform):
         "distance": (float,
             "Distance",
             "The approximative focus distance in meters (distance > 0)",
-            0.01,
+            0.0,
             1000000.0,
             DEFAULT_DISTANCE,
             GObject.ParamFlags.READWRITE
@@ -108,6 +109,12 @@ class Lenscorrection(GstBase.BaseTransform):
             "Reverse",
             "If this parameter is true, a reverse transform will be prepared. That is, you take an undistorted image as input and convert it so that it will look as if it would be a shot made with lens.",
             DEFAULT_REVERSE,
+            GObject.ParamFlags.READWRITE
+           ),
+        "grid": (bool,
+            "Grid",
+            "If this parameter is true, a rectangular grid is drawn over the source image before applying the lenscorrecton to show the applied correction (mainly for debuging)",
+            DEFAULT_GRID,
             GObject.ParamFlags.READWRITE
            ),
         "cammaker": (str,
@@ -140,6 +147,7 @@ class Lenscorrection(GstBase.BaseTransform):
         self.focallength = DEFAULT_FOCALLENGTH
         self.distance = DEFAULT_DISTANCE
         self.reverse = DEFAULT_REVERSE
+        self.grid = DEFAULT_GRID
         self.cammaker = DEFAULT_CAMMAKER
         self.cammodel = DEFAULT_CAMMODEL
         self.lens = DEFAULT_LENS
@@ -148,31 +156,32 @@ class Lenscorrection(GstBase.BaseTransform):
         """
         Query the Lensfun db for camera parameters
         """
-        Gst.info("query lensfun")
+        Gst.info("query lensfun database")
         try:
             #Query the Lensfun db for camera parameters
             Gst.info(f"Opening Lensfun database: {self.cammaker}, {self.cammodel}")
             db = lensfunpy.Database()
-            cam = db.find_cameras(self.cammaker, self.cammodel)[0]
-            print(cam)
+            self.cam = db.find_cameras(self.cammaker, self.cammodel)[0]
+            Gst.info(f"Camera found: {self.cam}")
         except Exception as e:
             Gst.error("Camera not found %s" % e)
             return False
         try: 
             if self.lens:
-                lens = db.find_lenses(cam,lens=self.lens)[0]
+                self.lensmodel = db.find_lenses(self.cam,lens=self.lens)[0]
             else:
-                lens = db.find_lenses(cam)[0]
-            print(lens)
+                self.lensmodel = db.find_lenses(self.cam)[0]
+            Gst.info(f"Lens found: {self.lensmodel}")
         except Exception as e:
             Gst.error("Lens not found %s" % e)
             return False
         try:
-            mod = lensfunpy.Modifier(lens, cam.crop_factor, self.width, self.height)
+            mod = lensfunpy.Modifier(self.lensmodel, self.cam.crop_factor, self.width, self.height)
             mod.initialize(self.focallength, self.aperture, self.distance, reverse=self.reverse)
 
             self.undistCoords = mod.apply_geometry_distortion()
-            Gst.info("%s" % self.undistCoords)
+            Gst.info(f"Undisortion coordinates: {self.undistCoords}")
+            Gst.info(f"Undisortion coordinate size: {self.undistCoords.shape}")
 
             return True
 
@@ -180,18 +189,53 @@ class Lenscorrection(GstBase.BaseTransform):
             Gst.error("%s" % e)
             return False
 
+    def draw_grid(self):
+        self.overlay = numpy.zeros((self.height, self.width, 3), dtype=numpy.uint8)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        stepx = int(self.width/8)
+        stepy = int(self.height/8)
+        cv2.putText(self.overlay,text=f"{self.cam}",
+                    org=(stepx+100,stepy+50),
+                    fontFace=font,
+                    fontScale=1,
+                    color=(255,255,255),
+                    thickness=5,
+                    lineType=cv2.LINE_AA)
+        cv2.putText(self.overlay,text=f"{self.lensmodel}",
+                    org=(stepx+100,stepy+100),
+                    fontFace=font,
+                    fontScale=1,
+                    color=(255,255,255),
+                    thickness=5,
+                    lineType=cv2.LINE_AA)
+        cv2.putText(self.overlay,text=f"{self.focallength}mm, F{self.aperture}, {self.distance}m",
+                    org=(stepx+100,stepy+150),
+                    fontFace=font,
+                    fontScale=1,
+                    color=(255,255,255),
+                    thickness=5,
+                    lineType=cv2.LINE_AA)
+        for i in range(1,8):
+            # draw blue grid lines
+            cv2.line(self.overlay,(stepx*i,0),(stepx*i,self.height),(0,0,255),5)
+            cv2.line(self.overlay,(0,stepy*i),(self.width,stepy*i),(0,0,255),5)
+
+        return True
+
     def do_set_caps(self, incaps, outcaps):
-        Gst.info("set caps")
         s = incaps.get_structure(0)
         self.width = s.get_int("width").value
         self.height = s.get_int("height").value
+
+        # Query the database here as the do_start method is executed before width and height is set
+        self.query_lensfun()
         
-        #self.query_lensfun()
+        if self.grid:
+            self.draw_grid()
 
         return True
 
     def do_get_property(self, prop):
-        Gst.info("get properties")
         if prop.name == 'aperture':
             return self.aperture
         elif prop.name == 'focallength':
@@ -200,6 +244,8 @@ class Lenscorrection(GstBase.BaseTransform):
             return self.distance
         elif prop.name == 'reverse':
             return self.reverse
+        elif prop.name == 'grid':
+            return self.grid
         elif prop.name == 'cammaker':
             return self.cammaker
         elif prop.name == 'cammodel':
@@ -210,7 +256,6 @@ class Lenscorrection(GstBase.BaseTransform):
             raise AttributeError('unknown property %s' % prop.name)
 
     def do_set_property(self, prop, value):
-        Gst.info("set properties")
         if prop.name == 'aperture':
             self.aperture = value
         elif prop.name == 'focallength':
@@ -219,23 +264,16 @@ class Lenscorrection(GstBase.BaseTransform):
             self.distance = value
         elif prop.name == 'reverse':
             self.reverse = value
+        elif prop.name == 'grid':
+            self.grid = value
         elif prop.name == 'cammaker':
-            Gst.info("set cammaker")
-            Gst.info("%s" % value)
             self.cammaker = value
         elif prop.name == 'cammodel':
-            Gst.info("set cammodel")
-            Gst.info("%s" % value)
             self.cammodel = value
         elif prop.name == 'lens':
             self.lens = value
         else:
             raise AttributeError('unknown property %s' % prop.name)
-
-    def do_start (self):
-        self.query_lensfun()
-
-        return True
 
     def do_transform(self, inbuf, outbuf):
         try:
@@ -252,21 +290,15 @@ class Lenscorrection(GstBase.BaseTransform):
                     dtype=numpy.uint8,
                     buffer=outbuf_info.data,
                 )
-                #frame[:] = numpy.invert(frame)
-                # Writing text over blank image using the cv2.putText function
-                font = cv2.FONT_HERSHEY_SIMPLEX
-                cv2.putText(frame,text='PythonGeeks',
-                     org=(70,300),
-                     fontFace=font,
-                     fontScale=2,
-                     color=(255,255,255),
-                     thickness=5,
-                     lineType=cv2.LINE_AA)
 
-                #undistorted = frame
-                undistorted = cv2.remap(frame, self.undistCoords, None, cv2.INTER_NEAREST)
-                #outbuf_info.data = cv2.remap(frame, self.undistCoords, None, cv2.INTER_NEAREST)
-                #outbuf.append_memory(mem)(frame)
+                if self.grid:
+                    img = cv2.addWeighted(frame, 0.5, self.overlay, 0.5, 0)
+                else:
+                    img = frame
+                
+                array = cv2.remap(img, self.undistCoords, None, cv2.INTER_NEAREST)
+                
+                undistorted[:] = array[:]
                 return Gst.FlowReturn.OK
 
         except Gst.MapError as e:

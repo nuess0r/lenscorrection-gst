@@ -24,8 +24,12 @@ Example![Compare before and after photos](overview.png  "Before and After")
 1. Install the prequisites
 ```
 #Debian Trixie
-sudo apt-get install gstreamer1.0-plugins-base gstreamer1.0-opencv gstreamer1.0-python3-plugin-loader gstreamer1.0-tools libpython3-dev python3-opencv python3-gi python3-gst-1.0 python3-lensfun
+sudo apt-get install gstreamer1.0-plugins-base gstreamer1.0-opencv gstreamer1.0-python3-plugin-loader gstreamer1.0-tools libpython3-dev python3-opencv python3-gi python3-gst-1.0
 git clone https://github.com/nuess0r/lenscorrection-gst.git
+cd lenscorrection-gst
+python3 -m venv .
+source bin/activate
+pip install lensfunpy
 rm ~/.cache/gstreamer-1.0/registry.x86_64.bin
 ```
 1. Open a terminal in the directory 'lenscorrection-gst'
@@ -36,7 +40,7 @@ export GST_PLUGIN_PATH=$(realpath .)
 ```
 1. Test if GStreamer sees the plugin with gst-inspect
 ```
-PAGER=cat gst-inspect-1.0  sample_filter
+PAGER=cat gst-inspect-1.0  lenscorrection
 ```
 1. Test the plugin
 ```
@@ -44,16 +48,15 @@ python3 python/test.py
 ```
 1. Test the plugin within a full GStreamer pipeline using gst-launch
 ```
-gst-launch-1.0  v4l2src device=/dev/video0 ! 'video/x-raw, width=640, height=480, framerate=30/1' ! videoconvert ! 'video/x-raw, width=640, height=480, framerate=30/1' ! lenscorrection aperture=5.6 focallength=35 distance=2.0 ! 'video/x-raw, width=640, height=480, framerate=30/1' ! tee name=t ! queue ! videoconvert !  x264enc tune=zerolatency bitrate=2000 speed-preset=ultrafast ! flvmux streamable=true ! fakesink t. ! queue ! videoconvert ! xvimagesink handle-events=false
+LANG= GST_DEBUG=python:4 gst-launch-1.0 videotestsrc num-buffers=100 ! video/x-raw, width=640, height=480, framerate=30/1 ! lenscorrection aperture=5.6 focallength=50 distance=10.0 reverse=False cammaker="NIKON CORPORATION" cammodel="NIKON D7200" lens="Nikon AF Zoom-Nikkor 28-105mm f/3.5-4.5D IF" ! 'video/x-raw, width=640, height=480, framerate=30/1' ! videoconvert ! xvimagesink handle-events=false
 ```
 
 ## Notes
 
-Setting camera manufactuer, camera type and lens type is fixed
+When grid=True then a grid of blue lines is put over the input source before
+applying the lenscorrection.
+This helps to see, what acually is done to the image.
 
-Video output after remap function is broken with following pipeline:
-
-LANG= GST_DEBUG=python:4 gst-launch-1.0 filesrc location=GOPR0141.MP4 ! decodebin ! videoconvert ! lenscorrection ! queue ! videoconvert ! xvimagesink 
 
 ## References
 
@@ -63,4 +66,6 @@ And the tutorial from Jason Kim:
 https://medium.com/@jasonlife/writing-gstreamer-plugin-with-python-b98627cd24c1
 
 Using lensfunpy and openCV for lens correction of images was already implemented by wildintellect in https://github.com/wildintellect/lenscorrection
+
+GStreamer Pyhon discussion channel (Matrix): #python:gstreamer.org
 
